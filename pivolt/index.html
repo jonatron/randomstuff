@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Raspberry Pi 5 Overclocking</title>
+<style>
+body {
+  font-family: Open Sans, Arial, sans-serif;
+  color: #454545;
+  font-size: 16px;
+  margin: 2em auto;
+  max-width: 1200px;
+  padding: 1em;
+  line-height: 1.4;
+  text-align: left;
+}
+img {
+  max-width: 1000px;
+  border: 1px solid black;
+}
+pre {
+  display: inline;
+  font-size: 13px;
+}
+</style>
+
+</head>
+<body>
+
+<h2>Beating Jeff's 3.14 Ghz Raspberry Pi 5</h2>
+
+<p>Jeff came up against a 1V limit in his video 
+  &quot;<a href="https://www.youtube.com/watch?v=TTIkZBsVJyA&t=931s"> Overclocking Raspberry Pi 5 to 3.14 GHz on Pi Day </a>&quot;
+after <a href="https://github.com/raspberrypi/firmware/issues/1876">firmware</a> was released to remove the 3Ghz limit.
+
+<p>There's a silicon lottery, and I tried to see what I could get on my particular Pi.
+  Geekbench takes ages to run and has a large run-to-run variance.
+  <br>
+  <pre>sysbench cpu run</pre> allows me to iterate more quickly.
+  I'm using this cooler, and I haven't tried any other cooling solutions. <br>
+  <a href="https://thepihut.com/products/aluminium-armour-heatsink-case-for-raspberry-pi-5">
+    <img width="250" height="250" src="case.webp"></a>
+
+<p><pre>
+over_voltage_delta=50000
+arm_freq=2900
+force_turbo=1
+
+    total number of events:              32951
+    total number of events:              32954
+
+over_voltage_delta=50000
+arm_freq=3000
+force_turbo=1
+
+    total number of events:              34076
+    total number of events:              34094
+
+over_voltage_delta=50000
+arm_freq=3200
+force_turbo=1
+    total number of events:              36373
+    total number of events:              36365
+</pre>
+
+<p>arm_freq=3300 or 3.3Ghz is where it gets very unstable.
+
+<h2>Firmware</h2>
+
+<p>The 1V limit is in the firmware. The Raspberry Pi is weird, because it starts by running code on the VPU/GPU. It's an obscure Brodcom <a href="https://en.wikipedia.org/wiki/VideoCore">VideoCore</a> instruction set.
+
+<p>There's a <a href="https://pip.raspberrypi.com/categories/685-whitepapers-app-notes/documents/RP-004651-WP/Raspberry-Pi-4-Boot-Security.pdf">PDF</a>
+ documenting the Raspberry Pi 4 boot security.
+
+<p>Basically the first 3 boot stages are BOOTROM (AKA BL0), bootsys, and bootmain. Bootrom is baked into the CPU, bootsys and bootmain are signed, so I can't modify them without the signing key, which I don't have. Somehow I doubt Raspberry Pi or Broadcom would hand me the keys.
+  There's some differences between the
+  <a href="https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#raspberry-pi-4-and-raspberry-pi-5-boot-flow">Raspberry Pi 4 and 5 boot process.</a>
+
+<p>There are some tools to parse and extract the Raspberry Pi 5 firmware (stored on the eeprom):
+
+  <br><a href="https://github.com/info-beamer/rpi-eeprom-tools">https://github.com/info-beamer/rpi-eeprom-tools</a>
+  <br><a href="https://github.com/raspberrypi/rpi-eeprom/">https://github.com/raspberrypi/rpi-eeprom/</a>
+
+<p>Handily, a Github user made <a href="https://github.com/NationalSecurityAgency/ghidra/pull/1147">Ghidra support for Videocore</a>.
+
+<p>Searching bootmain for "volt", I found what looks a lot like a voltage limiter.
+
+<p><img src="ghid.png">
+
+<p>A single mov.cc instruction can be patched to remove the voltage limit. However, it's in bootmain, which is signed, so we can't just patch bootmain and flash the eeprom.
+<p>However, as a root linux user on Raspberry Pi full access to system memory, including memory used by the videocore. I mmap'd /dev/vc-mem, searched for the instruction and replaced it, but i'll leave that as an exercise to the reader. I don't want people blaming me if their Pi decides to halt and catch fire.
+
+<h2>Slowing down before I speed up</h2>
+
+<p>If I set arm_freq=3300, it isn't stable. Also, I can't use force_turbo. To get it usable, I limited the cpu to 2.9Ghz as early as possible:
+
+<pre><b>/lib/systemd/system/slowcpu.service</b></pre>
+<br>
+
+<pre>
+[Unit]
+Description=Slow CPU
+Before=basic.target
+After=local-fs.target sysinit.target
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /slowcpu
+
+[Install]
+WantedBy=basic.target
+</pre>
+<br>
+<pre><b>/slowcpu</b></pre>
+<br>
+<pre>echo 2900000 | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq</pre>
+<br>
+<br><pre>sudo systemctl enable slowcpu.service</pre>
+
+<p>From there, I can remove the voltage limit:
+  <br><pre>sudo ./removelimit && vcgencmd cache_flush</pre>
+
+<p>Then I can put the frequency limit back up to 3.3Ghz
+  <br><pre>echo 3300000 | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq</pre>
+
+<p>And make it like force_turbo was on:
+  <br><pre>echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor</pre>
+
+<p>Checking my voltage and clock with over_voltage_delta=60000:
+<br>
+<pre>
+$ vcgencmd measure_volts
+volt=1.0437V
+$ vcgencmd measure_clock arm
+frequency(0)=3300034816
+</pre>
+
+<p>After all that...</p>
+
+  <br>
+  <pre>
+    total number of events:              37713
+    total number of events:              37712
+  </pre>
+
+<p>...That wasn't worth it.
+
+
+
+
+
+</body>
+</html>
