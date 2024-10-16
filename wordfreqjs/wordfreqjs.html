@@ -92,9 +92,9 @@ function gotDecoded(decoded_bytes) {
 
 
 function gotDecompressed(blob) {
-    blob.bytes()
-      .then(bytes => {
-        let decoded_bytes = deserialize(bytes);
+    blob.arrayBuffer()
+      .then(buf => {
+        let decoded_bytes = deserialize(buf);
         gotDecoded(decoded_bytes);
       })
 }
