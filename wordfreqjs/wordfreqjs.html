@@ -50,7 +50,7 @@ On this page, we delve meticulously into word frequencies, empowering you to fin
 <script>
 var decoded;
 var freqdict;
-var threshold = 4;
+var threshold = 3.5;
 
 
 /*
@@ -110,7 +110,7 @@ function analyse(text) {
             lower_word = lower_word.replace(",", "");
             lower_word = lower_word.replace(".", "");
             let lower_word_freq = freq_to_zipf( freqdict[lower_word] );
-            if(lower_word_freq < threshold) {
+            if(lower_word_freq < threshold || isNaN(lower_word_freq)) {
                 output += `<b>${word}</b> `;
             } else {
                 output += `${word} `;
